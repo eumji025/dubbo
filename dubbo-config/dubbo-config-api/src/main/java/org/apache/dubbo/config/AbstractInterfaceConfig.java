@@ -319,30 +319,41 @@ public abstract class AbstractInterfaceConfig extends AbstractMethodConfig {
     /**
      *
      * Load the registry and conversion it to {@link URL}, the priority order is: system property > dubbo registry config
-     *
+     *多协议多注册中心导出服务
      * @param provider whether it is the provider side
      * @return
      */
     protected List<URL> loadRegistries(boolean provider) {
         // check && override if necessary
         List<URL> registryList = new ArrayList<URL>();
+        //遍历多注册胚子
         if (CollectionUtils.isNotEmpty(registries)) {
+            //
             for (RegistryConfig config : registries) {
+                //获取注册中心url
                 String address = config.getAddress();
+                //没有填地址则使用0.0.0.0
                 if (StringUtils.isEmpty(address)) {
                     address = ANYHOST_VALUE;
                 }
+                //不为N/A
                 if (!RegistryConfig.NO_AVAILABLE.equalsIgnoreCase(address)) {
                     Map<String, String> map = new HashMap<String, String>();
+                    //记录applicationConfig中包含Paramter注解方法的属性值
                     appendParameters(map, application);
+                    //记录registerConfig中包含Paramter注解方法的属性值
                     appendParameters(map, config);
+                    //
                     map.put(PATH_KEY, RegistryService.class.getName());
+                    //记录运行时信息，版本时间等信息
                     appendRuntimeParameters(map);
+                    //记录协议
                     if (!map.containsKey(PROTOCOL_KEY)) {
                         map.put(PROTOCOL_KEY, DUBBO_PROTOCOL);
                     }
+                    //根据这些信息构建url 使用；分析分割
                     List<URL> urls = UrlUtils.parseURLs(address, map);
-
+                    //构建url
                     for (URL url : urls) {
                         url = URLBuilder.from(url)
                                 .addParameter(REGISTRY_KEY, url.getProtocol())

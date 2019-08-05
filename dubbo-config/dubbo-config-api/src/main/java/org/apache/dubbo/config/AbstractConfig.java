@@ -226,23 +226,30 @@ public abstract class AbstractConfig implements Serializable {
         Method[] methods = config.getClass().getMethods();
         for (Method method : methods) {
             try {
+                //获取方法上的Parameter注解
                 Parameter parameter = method.getAnnotation(Parameter.class);
                 if (parameter == null || !parameter.attribute()) {
                     continue;
                 }
                 String name = method.getName();
+                //判断是否为get方法
                 if (MethodUtils.isGetter(method)) {
                     String key;
+                    //获取注解的key值
                     if (parameter.key().length() > 0) {
                         key = parameter.key();
                     } else {
+                        //默认使用属性名（去掉get or is 然后首字母小写）
                         key = calculateAttributeFromGetter(name);
                     }
+                    //触发方法，获取对应的值
                     Object value = method.invoke(config);
                     if (value != null) {
+                        //判断是否存在前缀
                         if (prefix != null && prefix.length() > 0) {
                             key = prefix + "." + key;
                         }
+                        //记录
                         parameters.put(key, value);
                     }
                 }

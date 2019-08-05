@@ -83,12 +83,8 @@ public class ProviderModel {
 
         for (Method method : methodsToExport) {
             method.setAccessible(true);
-
-            List<ProviderMethodModel> methodModels = methods.get(method.getName());
-            if (methodModels == null) {
-                methodModels = new ArrayList<ProviderMethodModel>(1);
-                methods.put(method.getName(), methodModels);
-            }
+            //遍历方法，根据名称进行分组
+            List<ProviderMethodModel> methodModels = methods.computeIfAbsent(method.getName(), k -> new ArrayList<>(1));
             methodModels.add(new ProviderMethodModel(method, serviceName));
         }
     }

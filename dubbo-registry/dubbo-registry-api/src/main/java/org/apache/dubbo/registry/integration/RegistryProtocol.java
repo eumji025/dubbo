@@ -107,6 +107,8 @@ import static org.apache.dubbo.rpc.cluster.Constants.WEIGHT_KEY;
 
 /**
  * RegistryProtocol
+ *
+ * 注意这里registryFactory的实现，这里使用的是adaptive的实现
  */
 public class RegistryProtocol implements Protocol {
     public static final String[] DEFAULT_REGISTER_PROVIDER_KEYS = {
@@ -163,6 +165,13 @@ public class RegistryProtocol implements Protocol {
         this.protocol = protocol;
     }
 
+    /**
+     * set from {@link org.apache.dubbo.config.ServiceConfig#doExportUrlsFor1Protocol(org.apache.dubbo.config.ProtocolConfig, java.util.List)}
+     *
+     * 需要注意的是 ` Exporter<?> exporter = protocol.export(wrapperInvoker)`
+     * 这行代码本身的protocol也是adaptive的实现
+     * @param registryFactory
+     */
     public void setRegistryFactory(RegistryFactory registryFactory) {
         this.registryFactory = registryFactory;
     }
@@ -180,7 +189,18 @@ public class RegistryProtocol implements Protocol {
         return overrideListeners;
     }
 
+    /**
+     * 这里的registryFactory 会根据我们引入的包进行不同的选择，
+     * 通常情况下我们应该选择dubbo-registry-zookeeper
+     * 所以默认Registry对应的应该是{@link ZookeeperRegistry}
+     * 通过{@link org.apache.dubbo.registry.support.AbstractRegistry}
+     * -> {@link org.apache.dubbo.registry.support.FailbackRegistry}
+     * -> {@link ZookeeperRegistry#doRegister} 通过zkclient将地址注册到zk
+     * @param registryUrl
+     * @param registeredProviderUrl
+     */
     public void register(URL registryUrl, URL registeredProviderUrl) {
+        //获取注册中心
         Registry registry = registryFactory.getRegistry(registryUrl);
         registry.register(registeredProviderUrl);
     }
@@ -192,35 +212,43 @@ public class RegistryProtocol implements Protocol {
 
     @Override
     public <T> Exporter<T> export(final Invoker<T> originInvoker) throws RpcException {
+        //获取注册中心url
         URL registryUrl = getRegistryUrl(originInvoker);
         // url to export locally
+        //获取提供者url
         URL providerUrl = getProviderUrl(originInvoker);
 
         // Subscribe the override data
         // FIXME When the provider subscribes, it will affect the scene : a certain JVM exposes the service and call
         //  the same service. Because the subscribed is cached key with the name of the service, it causes the
         //  subscription information to cover.
+        //override相关url和监听器
         final URL overrideSubscribeUrl = getSubscribedOverrideUrl(providerUrl);
         final OverrideListener overrideSubscribeListener = new OverrideListener(overrideSubscribeUrl, originInvoker);
         overrideListeners.put(overrideSubscribeUrl, overrideSubscribeListener);
 
         providerUrl = overrideUrlWithConfig(providerUrl, overrideSubscribeListener);
-        //export invoker
+        //export invoker 进行本地暴露
         final ExporterChangeableWrapper<T> exporter = doLocalExport(originInvoker, providerUrl);
 
         // url to registry
+        //获取注册中心
         final Registry registry = getRegistry(originInvoker);
+        //获取提供者url
         final URL registeredProviderUrl = getRegisteredProviderUrl(providerUrl, registryUrl);
+        //注册提供者到map
         ProviderInvokerWrapper<T> providerInvokerWrapper = ProviderConsumerRegTable.registerProvider(originInvoker,
                 registryUrl, registeredProviderUrl);
         //to judge if we need to delay publish
         boolean register = registeredProviderUrl.getParameter("register", true);
         if (register) {
+            //注册到注册中心
             register(registryUrl, registeredProviderUrl);
             providerInvokerWrapper.setReg(true);
         }
 
         // Deprecated! Subscribe to override rules in 2.6.x or before.
+        //注册监听器
         registry.subscribe(overrideSubscribeUrl, overrideSubscribeListener);
 
         exporter.setRegisterUrl(registeredProviderUrl);
@@ -236,8 +264,16 @@ public class RegistryProtocol implements Protocol {
         return serviceConfigurationListener.overrideUrl(providerUrl);
     }
 
+    /**
+     * 本地暴露是实现的重要关键，是用来进行实际调用的重要部分
+     * @param originInvoker
+     * @param providerUrl
+     * @param <T>
+     * @return
+     */
     @SuppressWarnings("unchecked")
     private <T> ExporterChangeableWrapper<T> doLocalExport(final Invoker<T> originInvoker, URL providerUrl) {
+        //获取缓存的key
         String key = getCacheKey(originInvoker);
 
         return (ExporterChangeableWrapper<T>) bounds.computeIfAbsent(key, s -> {

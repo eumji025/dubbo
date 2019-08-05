@@ -112,6 +112,26 @@ public class DubboProtocol extends AbstractProtocol {
      */
     private final ConcurrentMap<String, String> stubServiceMethodsMap = new ConcurrentHashMap<>();
 
+
+    /**
+     * 处理客户端请求的handlerAdapter 调用链路如下
+     * reply:127, DubboProtocol$1 (org.apache.dubbo.rpc.protocol.dubbo)
+     * handleRequest:102, HeaderExchangeHandler (org.apache.dubbo.remoting.exchange.support.header)
+     * received:193, HeaderExchangeHandler (org.apache.dubbo.remoting.exchange.support.header)
+     * received:51, DecodeHandler (org.apache.dubbo.remoting.transport)
+     * run:57, ChannelEventRunnable (org.apache.dubbo.remoting.transport.dispatcher)
+     * runWorker:1128, ThreadPoolExecutor (java.util.concurrent)
+     * run:628, ThreadPoolExecutor$Worker (java.util.concurrent)
+     * run:834, Thread (java.lang)
+     *
+     * 当然最原始的出发点还是{@link org.apache.dubbo.remoting.transport.netty4.NettyServerHandler#channelRead(io.netty.channel.ChannelHandlerContext, java.lang.Object)}
+     * 然后再由他转发到线程池中
+     * received:61, AllChannelHandler (org.apache.dubbo.remoting.transport.dispatcher.all)
+     * received:88, HeartbeatHandler (org.apache.dubbo.remoting.exchange.support.header)
+     * received:40, MultiMessageHandler (org.apache.dubbo.remoting.transport)
+     * received:147, AbstractPeer (org.apache.dubbo.remoting.transport)
+     * channelRead:99, NettyServerHandler (org.apache.dubbo.remoting.transport.netty4)
+     */
     private ExchangeHandler requestHandler = new ExchangeHandlerAdapter() {
 
         @Override
@@ -149,6 +169,34 @@ public class DubboProtocol extends AbstractProtocol {
                 }
             }
             RpcContext.getContext().setRemoteAddress(channel.getRemoteAddress());
+
+            /**
+             * 调用过程(各种filter)
+             *
+             * sayHello:30, DemoServiceImpl (org.apache.dubbo.demo.provider)
+             * invokeMethod:-1, Wrapper1 (org.apache.dubbo.common.bytecode)
+             * doInvoke:59, JavassistProxyFactory$1 (org.apache.dubbo.rpc.proxy.javassist)
+             * invoke:84, AbstractProxyInvoker (org.apache.dubbo.rpc.proxy)
+             * invoke:56, DelegateProviderMetaDataInvoker (org.apache.dubbo.config.invoker)
+             * invoke:56, InvokerWrapper (org.apache.dubbo.rpc.protocol)
+             * invoke:55, ExceptionFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:92, MonitorFilter (org.apache.dubbo.monitor.support)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:48, TimeoutFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:81, TraceFilter (org.apache.dubbo.rpc.protocol.dubbo.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:96, ContextFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:148, GenericFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:38, ClassLoaderFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:41, EchoFilter (org.apache.dubbo.rpc.filter)
+             * invoke:82, ProtocolFilterWrapper$1 (org.apache.dubbo.rpc.protocol)
+             * invoke:157, ProtocolFilterWrapper$CallbackRegistrationInvoker (org.apache.dubbo.rpc.protocol)
+             */
             Result result = invoker.invoke(inv);
             return result.completionFuture().thenApply(Function.identity());
         }
@@ -239,6 +287,18 @@ public class DubboProtocol extends AbstractProtocol {
                         .equals(NetUtils.filterLocalHost(address.getAddress().getHostAddress()));
     }
 
+    /**
+     * 获取invoker的过程
+     *
+     * 获取port
+     * 获取path
+     * 获取version和group信息
+     * 拼接从exporterMap中获取DubboExporter
+     * @param channel
+     * @param inv
+     * @return
+     * @throws RemotingException
+     */
     Invoker<?> getInvoker(Channel channel, Invocation inv) throws RemotingException {
         boolean isCallBackServiceInvoke = false;
         boolean isStubServiceInvoke = false;
@@ -278,12 +338,21 @@ public class DubboProtocol extends AbstractProtocol {
         return DEFAULT_PORT;
     }
 
+    /**
+     * 默认的暴露实现
+     * @param invoker Service invoker
+     * @param <T>
+     * @return
+     * @throws RpcException
+     */
     @Override
     public <T> Exporter<T> export(Invoker<T> invoker) throws RpcException {
+        //获取url
         URL url = invoker.getUrl();
 
         // export service.
         String key = serviceKey(url);
+        //构建dubbo暴露器 里面还是包了一层
         DubboExporter<T> exporter = new DubboExporter<T>(invoker, key, exporterMap);
         exporterMap.put(key, exporter);
 
@@ -302,24 +371,28 @@ public class DubboProtocol extends AbstractProtocol {
                 stubServiceMethodsMap.put(url.getServiceKey(), stubServiceMethods);
             }
         }
-
+        //打开server
         openServer(url);
+        //优化序列化
         optimizeSerialization(url);
 
         return exporter;
     }
 
     private void openServer(URL url) {
-        // find server.
+        // find server. 获取url地址
         String key = url.getAddress();
         //client can export a service which's only for server to invoke
+        //判断是否为server
         boolean isServer = url.getParameter(IS_SERVER_KEY, true);
         if (isServer) {
+            //判断是否已经存在serve的exchange
             ExchangeServer server = serverMap.get(key);
             if (server == null) {
                 synchronized (this) {
                     server = serverMap.get(key);
                     if (server == null) {
+                        //创建server并记录奥server的map
                         serverMap.put(key, createServer(url));
                     }
                 }
@@ -331,6 +404,7 @@ public class DubboProtocol extends AbstractProtocol {
     }
 
     private ExchangeServer createServer(URL url) {
+        //构建url信息
         url = URLBuilder.from(url)
                 // send readonly event when server closes, it's enabled by default
                 .addParameterIfAbsent(CHANNEL_READONLYEVENT_SENT_KEY, Boolean.TRUE.toString())
@@ -338,14 +412,16 @@ public class DubboProtocol extends AbstractProtocol {
                 .addParameterIfAbsent(HEARTBEAT_KEY, String.valueOf(DEFAULT_HEARTBEAT))
                 .addParameter(CODEC_KEY, DubboCodec.NAME)
                 .build();
+        //获取server类型
         String str = url.getParameter(SERVER_KEY, DEFAULT_REMOTING_SERVER);
-
+        //判断是否存在
         if (str != null && str.length() > 0 && !ExtensionLoader.getExtensionLoader(Transporter.class).hasExtension(str)) {
             throw new RpcException("Unsupported server type: " + str + ", url: " + url);
         }
 
         ExchangeServer server;
         try {
+            //使用exchangers绑定
             server = Exchangers.bind(url, requestHandler);
         } catch (RemotingException e) {
             throw new RpcException("Fail to start server(url: " + url + ") " + e.getMessage(), e);

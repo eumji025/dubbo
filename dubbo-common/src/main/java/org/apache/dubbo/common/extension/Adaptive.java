@@ -27,6 +27,32 @@ import java.lang.annotation.Target;
 /**
  * Provide helpful information for {@link ExtensionLoader} to inject dependency extension instance.
  *
+ * 所有包含当前{@link Adaptive}注解的bean或者说方法，在我们通过dubbo SPI扩展获取的时候
+ * {@link ExtensionLoader#getExtensionLoader#getAdaptiveExtension()}方法的时候，实际上会通过我们
+ * {@link ExtensionLoader#createAdaptiveExtensionClass()} 获取被代理生成的类和编译成字节码
+ *
+ * 这里以我们的{@link ThreadPool}为例子看看生成的字节码是什么样子
+ *
+ * public class ThreadPool$Adaptive implements org.apache.dubbo.common.threadpool.ThreadPool {
+ * 	public java.util.concurrent.Executor getExecutor(org.apache.dubbo.common.URL arg0) {
+ * 		if (arg0 == null) throw new IllegalArgumentException("url == null");
+ * 		org.apache.dubbo.common.URL url = arg0;
+ * 		String extName = url.getParameter("threadpool", "fixed");
+ * 		if (extName == null)
+ * 			throw new IllegalStateException("Failed to get extension (org.apache.dubbo.common.threadpool.ThreadPool) name from url (" + url.toString() + ") use keys([threadpool])");
+ * 		org.apache.dubbo.common.threadpool.ThreadPool extension = (org.apache.dubbo.common.threadpool.ThreadPool) ExtensionLoader.getExtensionLoader(org.apache.dubbo.common.threadpool.ThreadPool.class).getExtension(extName);
+ * 		return extension.getExecutor(arg0);
+ *        }
+ * }
+ *
+ * 首先会保留原始的参数不变，然后通过参数不为空的校验（这里的URL是dubbo自己的，非java的URL）
+ * URL里有非常重要的参数，也就是说我们注解{@link Adaptive#value()}会决定我们getParameter的Key，而{@link SPI#value()}则会表示为默认值
+ * 如果我们的{@link Adaptive#value()}有多个key(key1,key2,key3)则会将当前的getParameter改写为如下形式
+ *  url.getParameter("key1",  url.getParameter("key2",  url.getParameter("key2", "fixed")));
+ *  也就是优先取K1，取不到取K2，还取不到去K3，最后默认为SPI的value
+ *
+ *
+ *
  * @see ExtensionLoader
  * @see URL
  */

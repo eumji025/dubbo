@@ -40,6 +40,15 @@ public class Transporters {
         return bind(URL.valueOf(url), handler);
     }
 
+    /**
+     * 判断呢存在几个handler，如果是多个则构建ChannelHandlerDispatcher分发器
+     *
+     * 最后通过transporter进行处理 默认是{@link NettyTransporter} 包含netty3 和netty4要进行去分
+     * @param url
+     * @param handlers
+     * @return
+     * @throws RemotingException
+     */
     public static Server bind(URL url, ChannelHandler... handlers) throws RemotingException {
         if (url == null) {
             throw new IllegalArgumentException("url == null");

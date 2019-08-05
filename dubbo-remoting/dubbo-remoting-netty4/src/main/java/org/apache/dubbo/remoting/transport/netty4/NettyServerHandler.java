@@ -48,6 +48,11 @@ public class NettyServerHandler extends ChannelDuplexHandler {
 
     private final ChannelHandler handler;
 
+    /**
+     * netty的处理器，其实还是要回调nettyServer
+     * @param url
+     * @param handler
+     */
     public NettyServerHandler(URL url, ChannelHandler handler) {
         if (url == null) {
             throw new IllegalArgumentException("url == null");
